@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en" x-data="app()" :class="dark ? 'dark' : ''">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sentiment Analysis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <meta name="color-scheme" content="light dark" />
+  <style>
+    .glass { background: rgba(255,255,255,.6); backdrop-filter: blur(10px);} 
+    .dark .glass { background: rgba(15,23,42,.6);} 
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-sky-50 to-indigo-100 dark:from-slate-900 dark:to-slate-800 text-slate-800 dark:text-slate-100">
+  <!-- Nav -->
+  <header class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <div class="h-9 w-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold">SA</div>
+      <span class="font-semibold">Sentiment Analyzer</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="dark=!dark" class="px-3 py-1 rounded-xl glass border border-white/40 dark:border-white/10">
+        <span x-show="!dark">🌙 Dark</span><span x-show="dark">☀️ Light</span>
+      </button>
+      <a href="#how" class="px-3 py-1 rounded-xl glass border border-white/40 dark:border-white/10">How it works</a>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="max-w-6xl mx-auto px-6 py-10 grid md:grid-cols-2 gap-8 items-center">
+    <div>
+      <h1 class="text-4xl md:text-5xl font-extrabold leading-tight">Understand the emotions behind the words. 😊</h1>
+      <p class="mt-4 text-slate-600 dark:text-slate-300">Paste a review or upload a CSV. We predict sentiment instantly using a TF‑IDF + Logistic Regression model trained with <span class="font-semibold">Random Oversampling</span> (train-only).</p>
+      <div class="mt-6 flex gap-3">
+        <a href="#try" class="px-5 py-3 rounded-2xl bg-indigo-600 text-white font-medium shadow-md hover:shadow-lg transition">Try it now</a>
+        <a href="#how" class="px-5 py-3 rounded-2xl glass border border-white/40 dark:border-white/10">How it works</a>
+      </div>
+    </div>
+    <div class="glass rounded-3xl p-6 shadow-xl border border-white/40 dark:border-white/10">
+      <div class="text-sm text-slate-500 dark:text-slate-400">Model</div>
+      <div class="mt-1 text-2xl font-bold">LogReg + TF‑IDF (Oversampling)</div>
+      <div class="mt-1 text-sm">Balanced training via RandomOverSampler</div>
+      <div class="mt-4 grid grid-cols-3 gap-3 text-center">
+        <div class="p-3 rounded-2xl bg-white/70 dark:bg-slate-800/70">
+          <div class="text-xs opacity-70">Accuracy</div>
+          <div class="text-xl font-bold">~0.94</div>
+        </div>
+        <div class="p-3 rounded-2xl bg-white/70 dark:bg-slate-800/70">
+          <div class="text-xs opacity-70">Latency</div>
+          <div class="text-xl font-bold">&lt;50ms</div>
+        </div>
+        <div class="p-3 rounded-2xl bg-white/70 dark:bg-slate-800/70">
+          <div class="text-xs opacity-70">Minority Recall</div>
+          <div class="text-xl font-bold">↑</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Try it -->
+  <section id="try" class="max-w-6xl mx-auto px-6 pb-16 grid md:grid-cols-2 gap-8 items-start">
+    <!-- Left: inputs -->
+    <div class="glass rounded-3xl p-6 border border-white/40 dark:border-white/10">
+      <h2 class="text-2xl font-bold mb-4">Analyze text or CSV</h2>
+
+      <!-- Drag & drop area -->
+      <div @dragover.prevent @drop.prevent="onDrop($event)" class="flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer hover:bg-white/50 dark:hover:bg-slate-900/30" @click="$refs.file.click()">
+        <input type="file" accept=".csv" class="hidden" x-ref="file" @change="onFileChange($event)">
+        <div class="text-4xl">📄</div>
+        <div class="font-medium">Drop CSV here or click to upload</div>
+        <div class="text-sm text-slate-500 dark:text-slate-400">CSV must include a <code>Sentence</code> column</div>
+        <template x-if="fileName">
+          <div class="mt-2 text-sm"><span class="font-semibold">Selected:</span> <span x-text="fileName"></span></div>
+        </template>
+      </div>
+
+      <div class="my-6 text-center text-sm text-slate-500 dark:text-slate-400">— or —</div>
+
+      <!-- Text area with live preview -->
+      <textarea x-model="text" @input="debouncedPredict()" :disabled="loading" class="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/60 p-4 outline-none focus:ring-2 focus:ring-indigo-500 min-h-[120px]" placeholder="Paste an Alexa review here..."></textarea>
+
+      <div class="mt-3 flex items-center justify-between text-sm">
+        <div :class="text.length>280 ? 'text-red-500' : 'text-slate-500'">
+          <span x-text="`${text.length} / 280`"></span>
+        </div>
+        <div class="flex gap-2">
+          <button @click="predictCSV()" :disabled="!file || loading" class="px-4 py-2 rounded-2xl bg-slate-800 text-white disabled:opacity-50">Analyze CSV</button>
+          <button @click="predictText()" :disabled="!text.trim() || loading || text.length>280" class="px-4 py-2 rounded-2xl bg-indigo-600 text-white disabled:opacity-50">Predict</button>
+        </div>
+      </div>
+
+      <template x-if="toast">
+        <div class="mt-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800" x-text="toast"></div>
+      </template>
+      <template x-if="error">
+        <div class="mt-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800" x-text="error"></div>
+      </template>
+    </div>
+
+    <!-- Right: results -->
+    <div class="space-y-6">
+      <div class="glass rounded-3xl p-6 border border-white/40 dark:border-white/10">
+        <h3 class="text-xl font-semibold mb-3">Prediction</h3>
+        <template x-if="loading">
+          <div class="animate-pulse h-6 w-40 bg-white/60 dark:bg-slate-800/60 rounded"></div>
+        </template>
+        <template x-if="result">
+          <div class="text-2xl font-bold"><span x-text="result.label"></span> <span class="text-sm text-slate-500" x-show="result.proba">(conf: <span x-text="result.proba"></span>)</span></div>
+        </template>
+        <template x-if="!loading && !result">
+          <div class="text-slate-500 dark:text-slate-400 text-sm">No prediction yet.</div>
+        </template>
+      </div>
+
+      <div class="glass rounded-3xl p-6 border border-white/40 dark:border-white/10">
+        <h3 class="text-xl font-semibold mb-3">Analysis graph (CSV)</h3>
+        <div x-show="graphData" class="rounded-xl overflow-hidden border border-white/40 dark:border-white/10">
+          <img :src="'data:image/png;base64,'+graphData" class="w-full" alt="Distribution graph" />
+        </div>
+        <template x-if="!graphData">
+          <div class="text-slate-500 dark:text-slate-400 text-sm">Upload a CSV to see class distribution.</div>
+        </template>
+        <button x-show="csvBlob" @click="downloadCSV()" class="mt-4 px-4 py-2 rounded-2xl bg-slate-800 text-white">Download predictions</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how" class="max-w-6xl mx-auto px-6 pb-16">
+    <h2 class="text-2xl font-bold mb-4">How it works</h2>
+    <ol class="grid md:grid-cols-3 gap-4">
+      <li class="glass p-4 rounded-2xl border">
+        <div class="font-semibold">1) Clean & Split</div>
+        <p class="text-sm mt-1">Stratified train/test; test is untouched.</p>
+      </li>
+      <li class="glass p-4 rounded-2xl border">
+        <div class="font-semibold">2) Vectorize</div>
+        <p class="text-sm mt-1">TF‑IDF with unigrams + bigrams.</p>
+      </li>
+      <li class="glass p-4 rounded-2xl border">
+        <div class="font-semibold">3) Balance & Train</div>
+        <p class="text-sm mt-1">Random Oversampling inside the pipeline (train only).</p>
+      </li>
+    </ol>
+  </section>
+
+  <footer class="py-10 text-center text-sm text-slate-500 dark:text-slate-400">Built with Flask • Tailwind • Alpine.js</footer>
+
+  <script>
+    function app(){
+      return {
+        dark: false,
+        file: null,
+        fileName: '',
+        text: '',
+        loading: false,
+        result: null,
+        error: null,
+        toast: null,
+        graphData: null,
+        csvBlob: null,
+        _timer: null,
+        debouncedPredict(){
+          clearTimeout(this._timer);
+          if(!this.text.trim()) { this.result=null; return; }
+          this._timer = setTimeout(()=> this.predictText(true), 500);
+        },
+        onFileChange(e){ this.file = e.target.files[0]; this.fileName = this.file?.name || ''; },
+        onDrop(e){ const f = e.dataTransfer.files?.[0]; if(f){ this.file=f; this.fileName=f.name; } },
+        async predictText(silent=false){
+          try{
+            this.loading = !silent; this.error = null;
+            const r = await fetch('/predict',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: this.text.trim()}) });
+            const data = await r.json();
+            if(!data.ok) throw new Error(data.error||'Prediction failed');
+            this.result = data; if(!silent) this.toast = 'Prediction ready';
+          }catch(err){ this.error = err.message; this.result=null; }
+          finally{ this.loading = false; if(!silent) setTimeout(()=> this.toast=null, 1500); }
+        },
+        async predictCSV(){
+          if(!this.file) return;
+          try{
+            this.loading = true; this.error=null; this.graphData=null; this.csvBlob=null;
+            const fd = new FormData(); fd.append('file', this.file);
+            const r = await fetch('/predict', { method:'POST', body: fd });
+            if(!r.ok){ throw new Error(await r.text()); }
+            const g = r.headers.get('X-Graph'); if(g) this.graphData = g;
+            const blob = await r.blob(); this.csvBlob = blob; this.toast='CSV predictions ready';
+          }catch(err){ this.error = err.message; }
+          finally{ this.loading=false; setTimeout(()=> this.toast=null, 1500); }
+        },
+        downloadCSV(){
+          if(!this.csvBlob) return;
+          const url = URL.createObjectURL(this.csvBlob);
+          const a = document.createElement('a'); a.href = url; a.download = 'predictions.csv'; document.body.appendChild(a); a.click();
+          setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
